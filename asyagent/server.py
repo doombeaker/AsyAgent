@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,23 +19,6 @@ from .errors import (
 )
 from .fetcher import fetch_source
 from .storage import LocalStorage, StorageBackend, make_storage
-
-
-def ensure_skillutils(settings: Settings) -> None:
-    if not settings.install_skillutils:
-        return
-    home = os.environ.get("HOME") or os.path.expanduser("~")
-    asy_dir = os.path.join(home, ".asy")
-    os.makedirs(asy_dir, exist_ok=True)
-    dest = os.path.join(asy_dir, "skillutils.asy")
-    if os.path.exists(dest):
-        return
-    src = os.path.join(os.path.dirname(__file__), "assets", "skillutils.asy")
-    if os.path.exists(src):
-        try:
-            shutil.copyfile(src, dest)
-        except OSError:
-            pass
 
 
 class RenderContext:
@@ -111,7 +93,6 @@ def _format_from_accept(headers) -> str:
 class App:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        ensure_skillutils(settings)
         self.storage: StorageBackend = make_storage(settings)
         self.sem = threading.BoundedSemaphore(max(1, settings.max_workers))
 

@@ -47,7 +47,6 @@ class Settings:
     default_encoding: str
     default_dpi: int
     tmp_dir: str | None
-    install_skillutils: bool
 
     storage_backend: str
     local_dir: str
@@ -101,7 +100,6 @@ class Settings:
             default_encoding=default_encoding,
             default_dpi=_int("ASYAGENT_DEFAULT_DPI", 150),
             tmp_dir=_env_or_none("ASYAGENT_TMP_DIR"),
-            install_skillutils=_bool("ASYAGENT_INSTALL_SKILLUTILS", True),
             storage_backend=backend,
             local_dir=_env("ASYAGENT_LOCAL_DIR", "./storage"),
             local_base_url=local_base_url,
@@ -142,7 +140,6 @@ class Settings:
             default_encoding=self.default_encoding,
             default_dpi=self.default_dpi,
             tmp_dir=self.tmp_dir,
-            install_skillutils=self.install_skillutils,
             storage_backend=self.storage_backend,
             local_dir=self.local_dir,
             local_base_url=self.local_base_url,

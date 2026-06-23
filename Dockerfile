@@ -22,7 +22,6 @@ COPY asyagent/ /app/asyagent/
 ENV ASYAGENT_HOST=0.0.0.0 \
     ASYAGENT_PORT=8787 \
     ASYAGENT_LOCAL_DIR=/data/storage \
-    ASYAGENT_INSTALL_SKILLUTILS=true \
     PYTHONPATH=/app \
     PYTHONUNBUFFERED=1
 

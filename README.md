@@ -137,7 +137,6 @@ All configuration via environment variables:
 | `ASYAGENT_DEFAULT_ENCODING` | `binary` | Default inline encoding |
 | `ASYAGENT_DEFAULT_DPI` | `150` | Default raster DPI |
 | `ASYAGENT_TMP_DIR` | — | Override temp directory for compile working dirs |
-| `ASYAGENT_INSTALL_SKILLUTILS` | `true` | Auto-install `skillutils.asy` to `~/.asy/` |
 
 ### Storage
 
@@ -177,8 +176,6 @@ asyagent/
   compiler.py          # asy invocation + gs rasterization + ZIP bundling
   storage.py           # Local / S3 / None storage backends
   server.py            # ThreadingHTTPServer, header-driven rendering
-  assets/
-    skillutils.asy     # bundled CJK/utility library, auto-installed to ~/.asy/
 tests/
   test_sigv4.py        # KAT against AWS test vector (AKIDEXAMPLE)
   test_compiler.py     # all formats, multi-shipout, errors
