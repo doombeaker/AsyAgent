@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "asyagent"
+version = "0.1.0"
+description = "An HTTP service that compiles Asymptote (*.asy) sources into rendered output (PDF, SVG, EPS, PNG, JPG)."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "asyagent contributors"}
+]
+keywords = ["asymptote", "asy", "vector-graphics", "compiler", "http-service", "pdf", "svg", "png"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/yaochi/asyagent"
+"Bug Tracker" = "https://github.com/yaochi/asyagent/issues"
+
+[project.scripts]
+asyagent = "asyagent.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["asyagent*"]
+exclude = ["tests*", "examples*"]
+
+[tool.setuptools.package-data]
+asyagent = ["py.typed"]
