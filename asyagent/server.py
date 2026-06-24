@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import urllib.parse
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import __version__
@@ -20,15 +22,24 @@ from .errors import (
 from .fetcher import fetch_source
 from .storage import LocalStorage, StorageBackend, make_storage
 
+logger = logging.getLogger("asyagent.server")
+
+
+def _trim(s: str, limit: int = 200) -> str:
+    if len(s) <= limit:
+        return s
+    return s[:limit] + f"...[{len(s) - limit} more chars]"
+
 
 class RenderContext:
     __slots__ = (
         "fmt", "mode", "encoding", "input_mode", "dpi",
         "timeout", "storage_prefix", "storage_bucket",
-        "filename", "disposition", "content_type",
+        "filename", "disposition", "content_type", "req_id",
     )
 
-    def __init__(self, settings: Settings, headers) -> None:
+    def __init__(self, settings: Settings, headers, req_id: str) -> None:
+        self.req_id = req_id
         def h(name: str) -> str:
             v = headers.get(name)
             return v.strip() if v else ""
@@ -97,6 +108,10 @@ class App:
         self.sem = threading.BoundedSemaphore(max(1, settings.max_workers))
 
     def render(self, ctx: RenderContext, body: bytes) -> tuple[int, bytes, str, dict]:
+        logger.info(
+            "[%s] render begin fmt=%s mode=%s encoding=%s dpi=%s timeout=%s",
+            ctx.req_id, ctx.fmt, ctx.mode, ctx.encoding, ctx.dpi, ctx.timeout,
+        )
         source = self._resolve_source(ctx, body)
 
         if ctx.storage_bucket or ctx.storage_prefix:
@@ -116,8 +131,11 @@ class App:
 
         acquired = self.sem.acquire(timeout=5)
         if not acquired:
+            logger.warning("[%s] server busy, semaphore timeout", ctx.req_id)
             raise ServerBusy("server is busy, try again later")
+        logger.info("[%s] semaphore acquired", ctx.req_id)
         try:
+            logger.info("[%s] compile begin", ctx.req_id)
             files = compile_source(
                 source,
                 fmt=ctx.fmt,
@@ -127,15 +145,19 @@ class App:
                 gs_bin=self.settings.gs_bin,
                 tmp_dir=self.settings.tmp_dir,
             )
+            logger.info("[%s] compile end files=%s", ctx.req_id, len(files))
         finally:
             self.sem.release()
+            logger.info("[%s] semaphore released", ctx.req_id)
 
         result = select_or_bundle(files)
+        logger.info("[%s] result ext=%s mime=%s size=%s", ctx.req_id, result.ext, result.mime, result.size)
 
         if ctx.mode == "url":
             url, key = storage.upload(
                 result, key_prefix=ctx.storage_prefix or "", filename_hint=ctx.filename
             )
+            logger.info("[%s] uploaded url=%s key=%s", ctx.req_id, url, key)
             payload = {
                 "ok": True,
                 "mode": "url",
@@ -220,12 +242,14 @@ class App:
         if url_value is not None:
             if not url_value:
                 raise EmptyInput("empty URL")
+            logger.info("[%s] fetch url=%s", ctx.req_id, url_value)
             return fetch_source(url_value, timeout=self.settings.fetch_timeout, max_bytes=self.settings.max_fetch_bytes)
 
         if source_value is None:
             source_value = ""
         if not source_value.strip():
             raise EmptyInput("empty Asymptote source")
+        logger.info("[%s] source length=%s preview=%r", ctx.req_id, len(source_value), _trim(source_value))
         return source_value
 
 
@@ -308,18 +332,24 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, data, mime, {"Cache-Control": "public, max-age=86400", "Content-Disposition": f'inline; filename="{os.path.basename(rel)}"'})
 
     def do_POST(self):
+        req_id = uuid.uuid4().hex[:12]
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+        logger.info("[%s] POST %s", req_id, path)
         if path not in ("/v1/render", "/render"):
+            logger.warning("[%s] not found: %s", req_id, path)
             return self._send_error(BadRequest("not found", detail=path))
 
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
+            logger.warning("[%s] invalid Content-Length", req_id)
             return self._send_error(BadRequest("invalid Content-Length"))
         if length < 0:
+            logger.warning("[%s] negative Content-Length", req_id)
             return self._send_error(BadRequest("negative Content-Length"))
         if length > self.app.settings.max_source_bytes + 1024:
+            logger.warning("[%s] request body too large: %s", req_id, length)
             return self._send_error(
                 BadRequest(
                     f"request body too large ({length} > {self.app.settings.max_source_bytes + 1024} bytes)",
@@ -327,13 +357,19 @@ class Handler(BaseHTTPRequestHandler):
             )
         body = self.rfile.read(length) if length > 0 else b""
 
-        ctx = RenderContext(self.app.settings, self.headers)
+        body_preview = _trim(body.decode("utf-8", "replace"))
+        logger.info("[%s] body preview: %r", req_id, body_preview)
+
+        ctx = RenderContext(self.app.settings, self.headers, req_id)
         try:
             status, data, mime, headers = self.app.render(ctx, body)
+            logger.info("[%s] response status=%s mime=%s size=%s", req_id, status, mime, len(data))
             self._send(status, data, mime, headers)
         except AsyAgentError as e:
+            logger.warning("[%s] error status=%s code=%s message=%s", req_id, e.status, e.code, e.message)
             self._send_error(e)
         except Exception as e:  # noqa: BLE001
+            logger.exception("[%s] unexpected error", req_id)
             err = AsyAgentError("internal error", detail=repr(e))
             self._send_error(err)
 
@@ -348,12 +384,12 @@ def build_server(settings: Settings) -> ThreadingHTTPServer:
 
 def run(settings: Settings) -> None:
     server = build_server(settings)
-    print(f"asyagent {__version__} listening on http://{settings.host}:{settings.port}")
-    print(f"  storage backend: {app_name(server.app)}")
+    logger.info("asyagent %s listening on http://%s:%s", __version__, settings.host, settings.port)
+    logger.info("  storage backend: %s", app_name(server.app))
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nshutting down...")
+        logger.info("shutting down...")
     finally:
         server.server_close()
 

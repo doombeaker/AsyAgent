@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 
 from .config import Settings
@@ -7,6 +8,10 @@ from .server import run
 
 
 def main() -> int:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
     settings = Settings.from_env()
     try:
         run(settings)
