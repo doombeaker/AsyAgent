@@ -331,6 +331,78 @@ class Handler(BaseHTTPRequestHandler):
             data = f.read()
         self._send(200, data, mime, {"Cache-Control": "public, max-age=86400", "Content-Disposition": f'inline; filename="{os.path.basename(rel)}"'})
 
+    def _read_body(self) -> tuple[bytes | None, str | None]:
+        """Returns (body, error). On error body is None and the connection
+        should be closed."""
+        max_bytes = self.app.settings.max_source_bytes + 1024
+        te = (self.headers.get("Transfer-Encoding") or "").lower()
+        if "chunked" in te:
+            return self._read_chunked(max_bytes)
+        cl = self.headers.get("Content-Length")
+        if cl is None:
+            return b"", None
+        try:
+            length = int(cl)
+        except ValueError:
+            return None, "invalid Content-Length"
+        if length < 0:
+            return None, "negative Content-Length"
+        if length > max_bytes:
+            return None, f"request body too large ({length} > {max_bytes} bytes)"
+        return self.rfile.read(length) if length > 0 else b"", None
+
+    def _read_chunked(self, max_bytes: int) -> tuple[bytes | None, str | None]:
+        """Read a chunked request body up to max_bytes."""
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            line = self.rfile.readline()
+            if not line:
+                return None, "unexpected EOF reading chunk size"
+            try:
+                size = int(line.strip().split(b";", 1)[0], 16)
+            except ValueError:
+                return None, "invalid chunk size line"
+            if size == 0:
+                # Consume the trailing CRLF (and any trailers).
+                while True:
+                    t = self.rfile.readline()
+                    if t in (b"\r\n", b"\n", b""):
+                        break
+                break
+            total += size
+            if total > max_bytes:
+                # Drain remaining to avoid leaving bytes on the wire.
+                self.close_connection = True
+                return None, f"chunked body too large (> {max_bytes} bytes)"
+            if len(chunks) > 65536:
+                self.close_connection = True
+                return None, "too many chunks"
+            chunks.append(self.rfile.read(size))
+            sep = self.rfile.readline()
+            if sep not in (b"\r\n", b"\n"):
+                self.close_connection = True
+                return None, "missing CRLF after chunk data"
+        return b"".join(chunks), None
+
+    def _drain_body(self) -> None:
+        """Best-effort: consume whatever body remains so keep-alive doesn't
+        pick up stale bytes. If we can't, force-close the connection."""
+        if self.headers.get("Transfer-Encoding", "").lower().find("chunked") >= 0:
+            self.close_connection = True
+            return
+        cl = self.headers.get("Content-Length")
+        if not cl:
+            # No declared body; nothing to drain. If client pipelined
+            # data anyway, close to be safe.
+            return
+        try:
+            length = int(cl)
+            if length > 0:
+                self.rfile.read(length)
+        except (ValueError, OSError):
+            self.close_connection = True
+
     def do_POST(self):
         req_id = uuid.uuid4().hex[:12]
         parsed = urllib.parse.urlparse(self.path)
@@ -338,24 +410,14 @@ class Handler(BaseHTTPRequestHandler):
         logger.info("[%s] POST %s", req_id, path)
         if path not in ("/v1/render", "/render"):
             logger.warning("[%s] not found: %s", req_id, path)
+            self._drain_body()
             return self._send_error(BadRequest("not found", detail=path))
 
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except ValueError:
-            logger.warning("[%s] invalid Content-Length", req_id)
-            return self._send_error(BadRequest("invalid Content-Length"))
-        if length < 0:
-            logger.warning("[%s] negative Content-Length", req_id)
-            return self._send_error(BadRequest("negative Content-Length"))
-        if length > self.app.settings.max_source_bytes + 1024:
-            logger.warning("[%s] request body too large: %s", req_id, length)
-            return self._send_error(
-                BadRequest(
-                    f"request body too large ({length} > {self.app.settings.max_source_bytes + 1024} bytes)",
-                )
-            )
-        body = self.rfile.read(length) if length > 0 else b""
+        body, err = self._read_body()
+        if err is not None:
+            logger.warning("[%s] read body error: %s", req_id, err)
+            self.close_connection = True
+            return self._send_error(BadRequest(err))
 
         body_preview = _trim(body.decode("utf-8", "replace"))
         logger.info("[%s] body preview: %r", req_id, body_preview)

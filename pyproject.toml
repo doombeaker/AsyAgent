@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "asyagent"
-version = "0.2.0"
+version = "0.3.0"
 description = "An HTTP service that compiles Asymptote (*.asy) sources into rendered output (PDF, SVG, EPS, PNG, JPG)."
 readme = "README.md"
 license = {text = "MIT"}
