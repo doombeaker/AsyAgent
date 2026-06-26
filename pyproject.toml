@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "asyagent"
-version = "0.3.0"
+version = "0.4.0"
 description = "An HTTP service that compiles Asymptote (*.asy) sources into rendered output (PDF, SVG, EPS, PNG, JPG)."
 readme = "README.md"
 license = {text = "MIT"}
@@ -43,4 +43,4 @@ include = ["asyagent*"]
 exclude = ["tests*", "examples*"]
 
 [tool.setuptools.package-data]
-asyagent = ["py.typed"]
+asyagent = ["py.typed", "_skill/**/*"]

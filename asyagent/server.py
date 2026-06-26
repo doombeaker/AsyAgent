@@ -16,10 +16,12 @@ from .errors import (
     BadRequest,
     EmptyInput,
     InvalidInput,
+    NotFound,
     ServerBusy,
     UnsupportedFormat,
 )
 from .fetcher import fetch_source
+from .skill import SkillBundle
 from .storage import LocalStorage, StorageBackend, make_storage
 
 logger = logging.getLogger("asyagent.server")
@@ -101,11 +103,30 @@ def _format_from_accept(headers) -> str:
     return ""
 
 
+def _build_skill_bundle(settings: Settings) -> SkillBundle:
+    """Resolve the skill directory and build the bundle.
+
+    Priority: ``ASYAGENT_SKILL_DIR`` override → packaged ``asyagent/_skill/``
+    directory next to this module. A missing override is a soft failure
+    (returns an inert bundle); a missing packaged directory is also soft.
+    """
+    if settings.skill_dir:
+        return SkillBundle(settings.skill_dir)
+    pkg_dir = os.path.dirname(os.path.abspath(__file__))
+    default = os.path.join(pkg_dir, "_skill")
+    return SkillBundle(default if os.path.isdir(default) else None)
+
+
 class App:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.storage: StorageBackend = make_storage(settings)
         self.sem = threading.BoundedSemaphore(max(1, settings.max_workers))
+        self.skill = _build_skill_bundle(settings)
+
+    @property
+    def base_url(self) -> str:
+        return (self.settings.local_base_url or "").rstrip("/")
 
     def render(self, ctx: RenderContext, body: bytes) -> tuple[int, bytes, str, dict]:
         logger.info(
@@ -301,7 +322,11 @@ class Handler(BaseHTTPRequestHandler):
                 "endpoints": {
                     "render": "POST /v1/render",
                     "health": "GET /healthz",
+                    "skill": "GET /v1/skill",
+                    "skill_files": "GET /v1/skill/files/{path}",
+                    "skill_archive": "GET /v1/skill/archive[.tar.gz|.zip]",
                 },
+                "skill_available": self.app.skill.available,
             }
             return self._send_json(200, info)
         if path == "/healthz":
@@ -310,6 +335,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(200 if ok else 503, {"status": "ok" if ok else "degraded", **health})
         if path.startswith("/files/"):
             return self._serve_file(path[len("/files/"):])
+        if path == "/v1/skill" or path == "/v1/skill/":
+            return self._serve_skill_manifest()
+        if path.startswith("/v1/skill/files/"):
+            return self._serve_skill_file(path[len("/v1/skill/files/"):])
+        if path == "/v1/skill/archive" or path.startswith("/v1/skill/archive."):
+            return self._serve_skill_archive(path)
         return self._send_error(BadRequest("not found", detail=path))
 
     def do_HEAD(self):
@@ -330,6 +361,46 @@ class Handler(BaseHTTPRequestHandler):
         with open(safe, "rb") as f:
             data = f.read()
         self._send(200, data, mime, {"Cache-Control": "public, max-age=86400", "Content-Disposition": f'inline; filename="{os.path.basename(rel)}"'})
+
+    def _serve_skill_manifest(self):
+        bundle = self.app.skill
+        if not bundle.available:
+            return self._send_error(NotFound("skill bundle not available on this server"))
+        manifest = bundle.manifest(self.app.base_url)
+        self._send_json(200, manifest)
+
+    def _serve_skill_file(self, rel: str):
+        bundle = self.app.skill
+        if not bundle.available:
+            return self._send_error(NotFound("skill bundle not available on this server"))
+        rel = urllib.parse.unquote(rel)
+        result = bundle.read_file(rel)
+        if result is None:
+            return self._send_error(NotFound("skill file not found", detail=rel))
+        data, mime = result
+        filename = os.path.basename(rel) or "skill-file"
+        self._send(200, data, mime, {
+            "Content-Disposition": f'inline; filename="{urllib.parse.quote(filename)}"',
+            "Cache-Control": "public, max-age=3600",
+        })
+
+    def _serve_skill_archive(self, path: str):
+        bundle = self.app.skill
+        if not bundle.available:
+            return self._send_error(NotFound("skill bundle not available on this server"))
+        path_lower = path.lower()
+        if path_lower.endswith(".zip"):
+            fmt, ext, mime = "zip", ".zip", "application/zip"
+        else:
+            fmt, ext, mime = "tar.gz", ".tar.gz", "application/gzip"
+        data = bundle.archive(fmt)
+        if data is None:
+            return self._send_error(NotFound("skill archive not available"))
+        filename = f"asymptote-skill{ext}"
+        self._send(200, data, mime, {
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "public, max-age=3600",
+        })
 
     def _read_body(self) -> tuple[bytes | None, str | None]:
         """Returns (body, error). On error body is None and the connection
