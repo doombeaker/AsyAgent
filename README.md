@@ -110,6 +110,33 @@ Service info (version, formats, storage health, defaults).
 
 Health check — returns 200 if storage is writable, 503 otherwise.
 
+### Skill distribution
+
+asyagent vendors the **Asymptote skill** (an OpenCode agent skill for writing `.asy` source) and serves it through three self-describing endpoints. An LLM agent that can reach the server can discover the skill, install it, and learn how to call the render API — all from `GET /v1/skill`.
+
+#### `GET /v1/skill`
+
+Returns a JSON manifest with four sections:
+
+- `skill` — name, version, description, license, compatibility (parsed from the skill's `SKILL.md` frontmatter).
+- `install` — `method: "archive"`, the `archive_url`, exact `steps` (curl + tar), and a note that `skillutils.asy` is provided server-side.
+- `files` — every file in the bundle with its `path`, fetch `url`, `size`, and `mime` (for lazy per-file download).
+- `render_api` — the `POST /v1/render` contract: body forms, `X-Asy-*` headers, response modes, and a ready-to-copy `curl` example pointing at this server.
+
+#### `GET /v1/skill/files/{path}`
+
+Serves a single skill file by its relative path (e.g. `SKILL.md`, `docs/01-basics.md`, `lib/skillutils.asy`, `scripts/asy_render.py`). Path traversal outside the bundle root returns 404.
+
+#### `GET /v1/skill/archive[.tar.gz|.zip]`
+
+Downloads the entire skill as a tar.gz (default) or zip archive. Use this to install the skill in one step:
+
+```bash
+curl -sL http://127.0.0.1:8787/v1/skill/archive.tar.gz | tar xz -C ~/.config/opencode/skills
+```
+
+`skillutils.asy` is bundled inside the archive and is also placed on the server's Asymptote module path (via the Docker image), so `import skillutils;` works server-side with no client setup.
+
 ### `GET /files/{key}`
 
 Serves files from local storage (only available when `ASYAGENT_STORAGE=local`).
@@ -137,6 +164,7 @@ All configuration via environment variables:
 | `ASYAGENT_DEFAULT_ENCODING` | `binary` | Default inline encoding |
 | `ASYAGENT_DEFAULT_DPI` | `150` | Default raster DPI |
 | `ASYAGENT_TMP_DIR` | — | Override temp directory for compile working dirs |
+| `ASYAGENT_SKILL_DIR` | package `_skill/` | Override the skill bundle directory served by `/v1/skill/*` endpoints. Defaults to the `_skill/` directory shipped inside the asyagent package. Set to an external skill directory to test changes before vendoring. |
 
 ### Storage
 

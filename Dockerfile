@@ -19,6 +19,8 @@ WORKDIR /app
 
 COPY asyagent/ /app/asyagent/
 
+RUN mkdir -p /root/.asy && cp /app/asyagent/_skill/lib/skillutils.asy /root/.asy/
+
 ENV ASYAGENT_HOST=0.0.0.0 \
     ASYAGENT_PORT=8787 \
     ASYAGENT_LOCAL_DIR=/data/storage \

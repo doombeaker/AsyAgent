@@ -22,6 +22,11 @@ class BadRequest(AsyAgentError):
     code = "bad_request"
 
 
+class NotFound(AsyAgentError):
+    status = 404
+    code = "not_found"
+
+
 class UnsupportedFormat(BadRequest):
     code = "unsupported_format"
 

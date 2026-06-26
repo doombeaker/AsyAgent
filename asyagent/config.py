@@ -65,6 +65,8 @@ class Settings:
     s3_presign_expires: int
     s3_use_tls: bool
 
+    skill_dir: str | None
+
     @classmethod
     def from_env(cls) -> "Settings":
         host = _env("ASYAGENT_HOST", "0.0.0.0")
@@ -116,6 +118,7 @@ class Settings:
             s3_presign=_bool("S3_PRESIGN", False),
             s3_presign_expires=_int("S3_PRESIGN_EXPIRES", 3600),
             s3_use_tls=_bool("S3_USE_TLS", True),
+            skill_dir=_env_or_none("ASYAGENT_SKILL_DIR"),
         )
 
     def with_overrides(
@@ -155,4 +158,5 @@ class Settings:
             s3_presign=self.s3_presign,
             s3_presign_expires=self.s3_presign_expires,
             s3_use_tls=self.s3_use_tls,
+            skill_dir=self.skill_dir,
         )
